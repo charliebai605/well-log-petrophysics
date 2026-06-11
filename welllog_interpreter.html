@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Well Log Petrophysical Interpreter - H-8</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; }
+  header { background: #16213e; padding: 16px 24px; border-bottom: 2px solid #0f3460; }
+  header h1 { font-size: 1.3em; color: #e94560; }
+  header p  { font-size: 0.8em; color: #aaa; margin-top: 4px; }
+
+  .main { display: flex; height: calc(100vh - 64px); }
+
+  /* ── 左側控制面板 ── */
+  .panel { width: 280px; min-width: 240px; background: #16213e;
+           padding: 16px; overflow-y: auto; border-right: 1px solid #0f3460; }
+  .panel h2 { font-size: 0.85em; color: #e94560; text-transform: uppercase;
+              letter-spacing: 1px; margin: 14px 0 6px; border-bottom: 1px solid #0f3460; padding-bottom: 4px; }
+  .panel h2:first-child { margin-top: 0; }
+  label { display: block; font-size: 0.78em; color: #bbb; margin: 6px 0 2px; }
+  input[type=number], input[type=range] { width: 100%; background: #0f3460; border: 1px solid #1a6b8a;
+    color: #eee; padding: 4px 6px; border-radius: 4px; font-size: 0.82em; }
+  input[type=range] { padding: 0; cursor: pointer; }
+  .val-display { display: inline-block; width: 52px; text-align: right; font-size: 0.82em; color: #e94560; }
+  .row { display: flex; align-items: center; gap: 6px; }
+  .btn { width: 100%; padding: 9px; background: #e94560; border: none; color: #fff;
+         border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: bold; margin-top: 8px; }
+  .btn:hover { background: #c73652; }
+  .btn-file { background: #0f3460; border: 1px dashed #1a6b8a; }
+  .btn-file:hover { background: #1a6b8a; }
+  #file-status { font-size: 0.75em; color: #aaa; margin-top: 4px; min-height: 16px; }
+  .stat-box { background: #0f3460; border-radius: 6px; padding: 8px; margin-top: 6px; font-size: 0.75em; line-height: 1.7; }
+  .stat-box span { color: #e94560; font-weight: bold; }
+  .legend-row { display: flex; align-items: center; gap: 6px; font-size: 0.75em; margin: 3px 0; }
+  .legend-swatch { width: 20px; height: 4px; border-radius: 2px; }
+
+  /* ── 右側畫布區域 ── */
+  .plot-area { flex: 1; overflow-x: auto; overflow-y: hidden; background: #fff; display: flex; align-items: stretch; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Well Log Petrophysical Interpreter</h1>
+  <p>H-8 Well &nbsp;|&nbsp; Upload LAS &rarr; Set Parameters &rarr; Calculate</p>
+</header>
+<div class="main">
+
+<!-- ══ CONTROL PANEL ══════════════════════════════════════ -->
+<div class="panel">
+
+  <h2>1. Upload LAS File</h2>
+  <input type="file" id="las-file" accept=".las,.LAS" style="display:none">
+  <button class="btn btn-file" onclick="document.getElementById('las-file').click()">Choose LAS File</button>
+  <div id="file-status">No file loaded</div>
+
+  <h2>Depth Range (m)</h2>
+  <div class="row">
+    <div style="flex:1"><label>Top (m)</label><input type="number" id="d_top" value="500" step="1"></div>
+    <div style="flex:1"><label>Bottom (m)</label><input type="number" id="d_bot" value="600" step="1"></div>
+  </div>
+
+  <h2>Q1 – Vshale (GR)</h2>
+  <label>GR_min (gAPI) <span class="val-display" id="v_grmin">60</span></label>
+  <input type="range" id="grmin" min="20" max="100" value="60"
+         oninput="document.getElementById('v_grmin').textContent=this.value">
+  <label>GR_max (gAPI) <span class="val-display" id="v_grmax">135</span></label>
+  <input type="range" id="grmax" min="80" max="200" value="135"
+         oninput="document.getElementById('v_grmax').textContent=this.value">
+
+  <h2>Q2 – Porosity (Density)</h2>
+  <label>RHOMA (g/cm³) <span class="val-display" id="v_rhoma">2.65</span></label>
+  <input type="range" id="rhoma" min="2.55" max="2.71" value="2.65" step="0.01"
+         oninput="document.getElementById('v_rhoma').textContent=(+this.value).toFixed(2)">
+  <label>RHOF (g/cm³) <span class="val-display" id="v_rhof">1.05</span></label>
+  <input type="range" id="rhof" min="0.80" max="1.20" value="1.05" step="0.01"
+         oninput="document.getElementById('v_rhof').textContent=(+this.value).toFixed(2)">
+
+  <h2>Q3 – Water Saturation (Archie)</h2>
+  <label>Rw (ohm·m) <span class="val-display" id="v_rw">1.57</span></label>
+  <input type="range" id="rw" min="0.05" max="5.0" value="1.57" step="0.01"
+         oninput="document.getElementById('v_rw').textContent=(+this.value).toFixed(2)">
+  <div class="row">
+    <div style="flex:1"><label>a</label><input type="number" id="pa" value="1.0" step="0.1" min="0.5" max="2"></div>
+    <div style="flex:1"><label>m</label><input type="number" id="pm" value="2.0" step="0.1" min="1" max="3"></div>
+    <div style="flex:1"><label>n</label><input type="number" id="pn" value="2.0" step="0.1" min="1" max="3"></div>
+  </div>
+
+  <h2>Q4 – Potential Sand Cutoffs</h2>
+  <label>Vsh cutoff <span class="val-display" id="v_vsh_cut">0.35</span></label>
+  <input type="range" id="vsh_cut" min="0.1" max="0.6" value="0.35" step="0.05"
+         oninput="document.getElementById('v_vsh_cut').textContent=(+this.value).toFixed(2)">
+  <label>PHIE cutoff <span class="val-display" id="v_phi_cut">0.08</span></label>
+  <input type="range" id="phi_cut" min="0.02" max="0.25" value="0.08" step="0.01"
+         oninput="document.getElementById('v_phi_cut').textContent=(+this.value).toFixed(2)">
+  <label>Sw cutoff <span class="val-display" id="v_sw_cut">0.75</span></label>
+  <input type="range" id="sw_cut" min="0.3" max="1.0" value="0.75" step="0.05"
+         oninput="document.getElementById('v_sw_cut').textContent=(+this.value).toFixed(2)">
+
+  <button class="btn" onclick="calculate()">Calculate &amp; Plot</button>
+
+  <h2>Results</h2>
+  <div class="stat-box" id="stats">Load a LAS file and click Calculate.</div>
+
+  <h2>Legend</h2>
+  <div class="legend-row"><div class="legend-swatch" style="background:#2ca02c"></div> GR</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#8B4513"></div> Vshale</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#1f77b4"></div> PHIT</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#00bcd4"></div> PHIE</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#111"></div> Rt (RLA5)</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#1a237e"></div> Sw</div>
+  <div class="legend-row"><div class="legend-swatch" style="background:#ffd600;height:10px;border-radius:3px"></div> Potential zone</div>
+</div>
+
+<!-- ══ PLOT CANVAS ════════════════════════════════════════ -->
+<div class="plot-area" id="plot-area">
+  <canvas id="wellCanvas"></canvas>
+</div>
+</div>
+
+<script>
+// ── LAS Parser ──────────────────────────────────────────────
+let lasData = null;
+
+document.getElementById('las-file').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    lasData = parseLAS(ev.target.result);
+    document.getElementById('file-status').textContent =
+      `Loaded: ${file.name}  (${lasData.depth.length} rows, ${lasData.depth[0].toFixed(1)}–${lasData.depth[lasData.depth.length-1].toFixed(1)} m)`;
+  };
+  reader.readAsText(file);
+});
+
+function parseLAS(text) {
+  const lines = text.split('\n');
+  let inAscii = false, colNames = [], rows = [];
+  const NULL_VAL = -999.25;
+
+  for (let line of lines) {
+    line = line.trim();
+    if (line.startsWith('~ASCII')) { inAscii = true; continue; }
+    if (!inAscii) continue;
+    if (line.startsWith('#')) {
+      // Extract column names from comment header
+      if (line.includes('DEPT') && colNames.length === 0) {
+        colNames = line.replace('#','').trim().split(/\s+/);
+      }
+      continue;
+    }
+    const vals = line.split(/\s+/).map(Number);
+    if (vals.length > 5) rows.push(vals);
+  }
+
+  // If column names not found from comments, use fixed order
+  if (colNames.length === 0) {
+    colNames = ['DEPT','RHOZ','CALI','TENS','BS','PEFZ','NPHI','TNPH','HDRA',
+                'ICV','IHV','SP','SPHI','DT','RLA1','RLA2','RLA3','RLA4','RLA5','ITT','GR'];
+  }
+
+  const idx = {};
+  colNames.forEach((n,i) => idx[n] = i);
+
+  const get = (row, name) => {
+    const i = idx[name];
+    if (i === undefined) return NaN;
+    const v = row[i];
+    return (v === NULL_VAL || v >= 99999 || v <= -9999) ? NaN : v;
+  };
+
+  const result = { depth:[], GR:[], RHOZ:[], NPHI:[], RLA5:[] };
+  for (const row of rows) {
+    if (row.length < colNames.length) continue;
+    result.depth.push(get(row,'DEPT'));
+    result.GR.push(get(row,'GR'));
+    result.RHOZ.push(get(row,'RHOZ'));
+    result.NPHI.push(get(row,'NPHI'));
+    result.RLA5.push(get(row,'RLA5'));
+  }
+  return result;
+}
+
+// ── Calculation ──────────────────────────────────────────────
+function calculate() {
+  if (!lasData) { alert('Please load a LAS file first.'); return; }
+
+  const dTop  = +document.getElementById('d_top').value;
+  const dBot  = +document.getElementById('d_bot').value;
+  const grMin = +document.getElementById('grmin').value;
+  const grMax = +document.getElementById('grmax').value;
+  const rhoma = +document.getElementById('rhoma').value;
+  const rhof  = +document.getElementById('rhof').value;
+  const rw    = +document.getElementById('rw').value;
+  const a     = +document.getElementById('pa').value;
+  const m     = +document.getElementById('pm').value;
+  const n_a   = +document.getElementById('pn').value;
+  const vshCut = +document.getElementById('vsh_cut').value;
+  const phiCut = +document.getElementById('phi_cut').value;
+  const swCut  = +document.getElementById('sw_cut').value;
+
+  // Filter depth
+  const mask = lasData.depth.map((_,i) => lasData.depth[i] >= dTop && lasData.depth[i] <= dBot);
+  const pick = arr => arr.filter((_,i) => mask[i]);
+  const depth = pick(lasData.depth);
+  const GR    = pick(lasData.GR);
+  const RHOZ  = pick(lasData.RHOZ);
+  const RT    = pick(lasData.RLA5);
+
+  const N = depth.length;
+  if (N < 5) { alert('Not enough data in selected depth range.'); return; }
+
+  // Q1: Vshale
+  const Vsh = GR.map(g => {
+    if (isNaN(g)) return NaN;
+    return Math.max(0, Math.min(1, (g - grMin)/(grMax - grMin)));
+  });
+
+  // Q2: Porosity
+  const PHIT = RHOZ.map(r => {
+    if (isNaN(r)) return NaN;
+    return Math.max(0, (rhoma - r)/(rhoma - rhof));
+  });
+
+  // PHIsh: avg PHIT where GR > 125
+  let shSum = 0, shCnt = 0;
+  for (let i=0; i<N; i++) if (!isNaN(GR[i]) && GR[i]>125 && !isNaN(PHIT[i])) { shSum+=PHIT[i]; shCnt++; }
+  const PHIsh = shCnt > 0 ? shSum/shCnt : 0.10;
+
+  const PHIE = PHIT.map((pt, i) => {
+    if (isNaN(pt) || isNaN(Vsh[i])) return NaN;
+    return Math.max(0, pt - Vsh[i]*PHIsh);
+  });
+
+  // Q3: Sw (Archie)
+  const Sw = RT.map((rt, i) => {
+    if (isNaN(rt) || isNaN(PHIE[i]) || PHIE[i] <= 0) return NaN;
+    const val = Math.pow(a*rw / (rt * Math.pow(PHIE[i], m)), 1/n_a);
+    return Math.max(0, Math.min(1, val));
+  });
+
+  // Q4: Potential zones
+  const isPot = Sw.map((sw,i) =>
+    !isNaN(sw) && Vsh[i] < vshCut && PHIE[i] > phiCut && sw < swCut
+  );
+
+  // Stats
+  const nanMean = arr => { const v=arr.filter(x=>!isNaN(x)); return v.length?v.reduce((a,b)=>a+b,0)/v.length:NaN; };
+  const nanMin  = arr => { const v=arr.filter(x=>!isNaN(x)); return v.length?Math.min(...v):NaN; };
+  const nanMax  = arr => { const v=arr.filter(x=>!isNaN(x)); return v.length?Math.max(...v):NaN; };
+
+  const potCount = isPot.filter(Boolean).length;
+  const potThick = potCount * 0.1524;
+
+  document.getElementById('stats').innerHTML =
+    `<b>Interval:</b> <span>${dTop}–${dBot} m</span><br>
+     <b>GR:</b> <span>${nanMin(GR).toFixed(0)}–${nanMax(GR).toFixed(0)} gAPI</span><br>
+     <b>avg Vsh:</b> <span>${nanMean(Vsh).toFixed(2)}</span><br>
+     <b>avg PHIT:</b> <span>${nanMean(PHIT).toFixed(3)}</span><br>
+     <b>avg PHIE:</b> <span>${nanMean(PHIE).toFixed(3)}</span><br>
+     <b>PHIsh:</b> <span>${PHIsh.toFixed(3)}</span><br>
+     <b>Rw (input):</b> <span>${rw} ohm·m</span><br>
+     <b>avg Sw:</b> <span>${nanMean(Sw).toFixed(3)}</span><br>
+     <b>Potential thickness:</b> <span>${potThick.toFixed(1)} m</span>`;
+
+  drawTracks(depth, GR, Vsh, PHIT, PHIE, RT, Sw, isPot,
+             {grMin,grMax,rhoma,rhof,rw,a,m:m,n:n_a,vshCut,phiCut,swCut,PHIsh});
+}
+
+// ── Canvas Drawing ──────────────────────────────────────────
+function drawTracks(depth, GR, Vsh, PHIT, PHIE, RT, Sw, isPot, params) {
+  const canvas = document.getElementById('wellCanvas');
+  const container = document.getElementById('plot-area');
+  const N = depth.length;
+
+  const TRACK_W = 160;
+  const TRACKS  = 5;
+  const HDR_H   = 50;
+  const LBL_W   = 50;
+  const totalW  = LBL_W + TRACK_W * TRACKS;
+  const totalH  = Math.max(container.clientHeight, 600);
+  const plotH   = totalH - HDR_H;
+
+  canvas.width  = totalW;
+  canvas.height = totalH;
+
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, totalW, totalH);
+
+  // Y mapping: depth → pixel
+  const dMin = depth[0], dMax = depth[N-1];
+  const yOf = d => HDR_H + (d - dMin)/(dMax - dMin) * plotH;
+
+  // ── Draw potential zone bands behind all tracks ──
+  for (let i=0; i<N-1; i++) {
+    if (isPot[i]) {
+      const y0 = yOf(depth[i]);
+      const y1 = yOf(depth[i+1]);
+      ctx.fillStyle = 'rgba(255,214,0,0.30)';
+      ctx.fillRect(LBL_W, y0, TRACK_W*TRACKS, y1-y0);
+    }
+  }
+
+  // ── Track helpers ──
+  const trackX = t => LBL_W + t * TRACK_W;
+
+  function drawGrid(tx) {
+    ctx.strokeStyle = '#ddd'; ctx.lineWidth = 0.5;
+    for (let d = Math.ceil(dMin/10)*10; d <= dMax; d+=10) {
+      const y = yOf(d);
+      ctx.beginPath(); ctx.moveTo(tx, y); ctx.lineTo(tx+TRACK_W, y); ctx.stroke();
+    }
+    ctx.strokeStyle='#aaa'; ctx.lineWidth=0.3;
+    for (let d = Math.ceil(dMin/2)*2; d <= dMax; d+=2) {
+      const y = yOf(d);
+      ctx.beginPath(); ctx.moveTo(tx, y); ctx.lineTo(tx+TRACK_W, y); ctx.stroke();
+    }
+  }
+
+  function drawCurve(tx, data, vMin, vMax, color, lw=1.2) {
+    ctx.strokeStyle = color; ctx.lineWidth = lw;
+    ctx.beginPath();
+    let first = true;
+    for (let i=0; i<N; i++) {
+      if (isNaN(data[i])) { first=true; continue; }
+      const x = tx + Math.max(0,Math.min(1,(data[i]-vMin)/(vMax-vMin))) * TRACK_W;
+      const y = yOf(depth[i]);
+      if (first) { ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  function fillBetween(tx, d1, d2, vMin, vMax, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    // forward on d1
+    for (let i=0; i<N; i++) {
+      if (isNaN(d1[i])) continue;
+      const x = tx + Math.max(0,Math.min(1,(d1[i]-vMin)/(vMax-vMin))) * TRACK_W;
+      ctx.lineTo(x, yOf(depth[i]));
+    }
+    // backward on d2
+    for (let i=N-1; i>=0; i--) {
+      if (isNaN(d2[i])) continue;
+      const x = tx + Math.max(0,Math.min(1,(d2[i]-vMin)/(vMax-vMin))) * TRACK_W;
+      ctx.lineTo(x, yOf(depth[i]));
+    }
+    ctx.closePath(); ctx.fill();
+  }
+
+  function drawVline(tx, val, vMin, vMax, color, dash=[]) {
+    const x = tx + (val-vMin)/(vMax-vMin)*TRACK_W;
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.setLineDash(dash);
+    ctx.beginPath(); ctx.moveTo(x, HDR_H); ctx.lineTo(x, totalH); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function trackHeader(tx, title, sub, color) {
+    ctx.fillStyle = '#f0f0f0';
+    ctx.fillRect(tx, 0, TRACK_W, HDR_H);
+    ctx.strokeStyle = '#999'; ctx.lineWidth = 0.5;
+    ctx.strokeRect(tx, 0, TRACK_W, HDR_H);
+    ctx.fillStyle = color; ctx.font = 'bold 11px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(title, tx + TRACK_W/2, 18);
+    ctx.fillStyle = '#555'; ctx.font = '9px Arial';
+    ctx.fillText(sub, tx + TRACK_W/2, 32);
+    ctx.fillText(title === 'Rt' ? 'log scale' : '', tx+TRACK_W/2, 44);
+  }
+
+  function drawBorder(tx) {
+    ctx.strokeStyle = '#999'; ctx.lineWidth = 0.8;
+    ctx.strokeRect(tx, HDR_H, TRACK_W, plotH);
+  }
+
+  // ── Depth label column ──
+  ctx.fillStyle = '#f5f5f5'; ctx.fillRect(0, 0, LBL_W, totalH);
+  ctx.fillStyle = '#333'; ctx.font = 'bold 10px Arial'; ctx.textAlign='center';
+  ctx.fillText('Depth', LBL_W/2, 20); ctx.fillText('(m)', LBL_W/2, 32);
+  ctx.strokeStyle = '#bbb'; ctx.lineWidth = 0.5;
+  for (let d = Math.ceil(dMin/10)*10; d <= dMax; d+=10) {
+    const y = yOf(d);
+    ctx.fillStyle = '#555'; ctx.font = '9px Arial';
+    ctx.fillText(d.toFixed(0), LBL_W/2, y+3);
+    ctx.beginPath(); ctx.moveTo(LBL_W-6,y); ctx.lineTo(LBL_W,y); ctx.stroke();
+  }
+
+  // ── T0: GR ──
+  let tx = trackX(0);
+  trackHeader(tx, 'GR', '0 — 200 gAPI', '#2ca02c');
+  drawGrid(tx);
+  fillBetween(tx, GR, new Array(N).fill(params.grMin), 0, 200, 'rgba(255,255,180,0.6)');
+  drawVline(tx, params.grMin, 0, 200, '#2ca02c', [4,3]);
+  drawVline(tx, params.grMax, 0, 200, '#e63946', [4,3]);
+  drawCurve(tx, GR, 0, 200, '#2ca02c');
+  drawBorder(tx);
+
+  // ── T1: Vshale ──
+  tx = trackX(1);
+  trackHeader(tx, 'Vshale', '0 — 1', '#8B4513');
+  drawGrid(tx);
+  fillBetween(tx, Vsh, new Array(N).fill(0), 0, 1, 'rgba(139,69,19,0.25)');
+  drawVline(tx, params.vshCut, 0, 1, '#e63946', [4,3]);
+  drawCurve(tx, Vsh, 0, 1, '#8B4513');
+  drawBorder(tx);
+
+  // ── T2: Porosity ──
+  tx = trackX(2);
+  trackHeader(tx, 'Porosity', '0 — 0.5 v/v', '#1f77b4');
+  drawGrid(tx);
+  fillBetween(tx, PHIT, PHIE, 0, 0.5, 'rgba(139,69,19,0.20)');
+  fillBetween(tx, PHIE, new Array(N).fill(0), 0, 0.5, 'rgba(0,188,212,0.20)');
+  drawVline(tx, params.phiCut, 0, 0.5, '#555', [3,3]);
+  drawCurve(tx, PHIT, 0, 0.5, '#1f77b4');
+  drawCurve(tx, PHIE, 0, 0.5, '#00bcd4', 1.6);
+  drawBorder(tx);
+
+  // ── T3: Rt (log) ──
+  tx = trackX(3);
+  trackHeader(tx, 'Rt', '1 — 100 ohm·m', '#333');
+  drawGrid(tx);
+  // log scale curve
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 1.2; ctx.beginPath();
+  let first = true;
+  for (let i=0; i<N; i++) {
+    if (isNaN(RT[i]) || RT[i]<=0) { first=true; continue; }
+    const x = tx + Math.max(0,Math.min(1,(Math.log10(RT[i])-0)/(2))) * TRACK_W;
+    const y = yOf(depth[i]);
+    if (first) { ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  // log grid lines at 1,10,100
+  [1,10,100].forEach(v => {
+    const x = tx + Math.log10(v)/2*TRACK_W;
+    ctx.strokeStyle='#bbb'; ctx.lineWidth=0.8; ctx.setLineDash([2,2]);
+    ctx.beginPath(); ctx.moveTo(x,HDR_H); ctx.lineTo(x,totalH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#888'; ctx.font='8px Arial'; ctx.textAlign='center';
+    ctx.fillText(v, x, HDR_H+10);
+  });
+  drawBorder(tx);
+
+  // ── T4: Sw ──
+  tx = trackX(4);
+  trackHeader(tx, 'Sw', '0 — 1', '#1a237e');
+  drawGrid(tx);
+  fillBetween(tx, new Array(N).fill(1), Sw, 0, 1, 'rgba(173,216,230,0.4)');
+  fillBetween(tx, Sw, new Array(N).fill(0),
+    0, 1, (i) => isPot[i] ? 'rgba(233,69,96,0.35)' : 'rgba(233,69,96,0.15)');
+  // draw red fill for potential zones
+  for (let i=0; i<N-1; i++) {
+    if (isPot[i] && !isNaN(Sw[i])) {
+      const y0 = yOf(depth[i]), y1 = yOf(depth[i+1]);
+      const x0 = tx;
+      const x1 = tx + Math.max(0,Math.min(1,Sw[i]))*TRACK_W;
+      ctx.fillStyle = 'rgba(233,69,96,0.35)';
+      ctx.fillRect(x0, y0, x1-x0, y1-y0);
+    }
+  }
+  drawVline(tx, params.swCut, 0, 1, '#e63946', [4,3]);
+  drawCurve(tx, Sw, 0, 1, '#1a237e');
+  drawBorder(tx);
+
+  ctx.textAlign = 'left';  // reset
+}
+
+// Auto-load if page already has data
+window.addEventListener('load', () => {
+  // Show placeholder message on canvas
+  const canvas = document.getElementById('wellCanvas');
+  const container = document.getElementById('plot-area');
+  canvas.width = container.clientWidth || 800;
+  canvas.height = container.clientHeight || 600;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#f9f9f9'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#aaa'; ctx.font = '16px Arial'; ctx.textAlign='center';
+  ctx.fillText('Load a LAS file and click Calculate', canvas.width/2, canvas.height/2);
+});
+</script>
+</body>
+</html>
